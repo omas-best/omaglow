@@ -3,7 +3,7 @@
 Animated Omarchy-colored glow for your focused window.
 
 <p align="center">
-  <img src="assets/omaglow-logo.png" alt="Omaglow logo" width="560">
+  <img src="assets/omaglow-logo.png" alt="Omaglow block wordmark inside a gradient window frame" width="640">
 </p>
 
 Omaglow gives the active window a thin cyan, blue, and purple gradient border with a restrained inner glow. Hyprland renders and animates the effect itself. There is no overlay window, focus watcher, or polling process.
