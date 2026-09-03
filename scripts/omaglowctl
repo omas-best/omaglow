@@ -1,0 +1,176 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+plugin_dir=$(cd -- "$script_dir/.." && pwd)
+default_config="$plugin_dir/config/default.conf"
+user_config="${XDG_CONFIG_HOME:-${HOME:?HOME is not set}/.config}/omaglow/config.conf"
+config_file="${OMAGLOW_CONFIG:-$user_config}"
+runtime_dir="${XDG_RUNTIME_DIR:-}"
+active_marker="${runtime_dir:+$runtime_dir/omaglow-${UID}.active}"
+
+enabled=true
+colors=00d9ff,3388ff,9b5de5,00d9ff
+speed=4.5
+intensity=0.70
+radius=8
+border_size=2
+opacity=0.90
+
+die() {
+  printf 'error: %s\n' "$*" >&2
+  exit 1
+}
+
+trim() {
+  local value=$1
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+read_config() {
+  local file=$1 line key value
+  [[ -r "$file" ]] || die "cannot read config: $file"
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line=$(trim "${line%%#*}")
+    [[ -z "$line" ]] && continue
+    [[ "$line" == *=* ]] || die "$file: expected key=value: $line"
+    key=$(trim "${line%%=*}")
+    value=$(trim "${line#*=}")
+    case "$key" in
+      enabled|colors|speed|intensity|radius|border_size|opacity)
+        printf -v "$key" '%s' "$value"
+        ;;
+      *) die "$file: unknown setting: $key" ;;
+    esac
+  done < "$file"
+}
+
+is_decimal() {
+  [[ $1 =~ ^([0-9]+([.][0-9]+)?|[.][0-9]+)$ ]]
+}
+
+decimal_between() {
+  awk -v value="$1" -v low="$2" -v high="$3" \
+    'BEGIN { exit !(value >= low && value <= high) }'
+}
+
+validate_config() {
+  local color
+  [[ "$enabled" == true || "$enabled" == false ]] || die "enabled must be true or false"
+  is_decimal "$speed" && decimal_between "$speed" 0.5 60 || die "speed must be between 0.5 and 60 seconds"
+  is_decimal "$intensity" && decimal_between "$intensity" 0 1 || die "intensity must be between 0 and 1"
+  is_decimal "$opacity" && decimal_between "$opacity" 0 1 || die "opacity must be between 0 and 1"
+  [[ "$radius" =~ ^[0-9]+$ ]] && (( radius <= 100 )) || die "radius must be an integer from 0 to 100"
+  [[ "$border_size" =~ ^[0-9]+$ ]] && (( border_size >= 1 && border_size <= 20 )) || die "border_size must be an integer from 1 to 20"
+
+  IFS=',' read -r -a color_values <<< "$colors"
+  (( ${#color_values[@]} >= 2 && ${#color_values[@]} <= 8 )) || die "colors must contain 2 to 8 comma-separated RGB hex values"
+  for color in "${color_values[@]}"; do
+    [[ "$color" =~ ^[0-9A-Fa-f]{6}$ ]] || die "invalid RGB color: $color"
+  done
+}
+
+load_config() {
+  read_config "$default_config"
+  if [[ -e "$config_file" && "$config_file" != "$default_config" ]]; then
+    read_config "$config_file"
+  fi
+  validate_config
+}
+
+alpha_hex() {
+  awk -v value="$1" 'BEGIN { printf "%02x", int((value * 255) + 0.5) }'
+}
+
+build_lua_colors() {
+  local alpha=$1 color separator="" result=""
+  for color in "${color_values[@]}"; do
+    result+="${separator}\"rgba(${color,,}${alpha})\""
+    separator=", "
+  done
+  printf '%s' "$result"
+}
+
+build_batch() {
+  local border_alpha glow_alpha duration_ds border_colors glow_colors
+  border_alpha=$(alpha_hex "$opacity")
+  glow_alpha=$(alpha_hex "$(awk -v a="$intensity" -v b="$opacity" 'BEGIN { print a * b }')")
+  duration_ds=$(awk -v seconds="$speed" 'BEGIN { printf "%.2f", seconds * 10 }')
+  border_colors=$(build_lua_colors "$border_alpha")
+  glow_colors=$(build_lua_colors "$glow_alpha")
+
+  printf '%s' "eval hl.config({ general = { border_size = $border_size, col = { active_border = { colors = { $border_colors }, angle = 0 } } }, decoration = { glow = { enabled = true, range = $radius, render_power = 3, color = { colors = { $glow_colors }, angle = 0 } } } }); "
+  printf '%s' "eval hl.animation({ leaf = \"borderangle\", enabled = true, speed = $duration_ds, bezier = \"linear\", style = \"loop\" }); "
+  printf '%s' "eval hl.animation({ leaf = \"glowangle\", enabled = true, speed = $duration_ds, bezier = \"linear\", style = \"loop\" })"
+}
+
+require_hyprland() {
+  command -v hyprctl >/dev/null 2>&1 || die "hyprctl is required"
+  [[ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]] || die "no running Hyprland session was found"
+  [[ -n "$active_marker" && -d "$runtime_dir" ]] || die "XDG_RUNTIME_DIR is not available"
+}
+
+apply_effect() {
+  local batch
+  load_config
+  require_hyprland
+
+  if [[ "$enabled" == false ]]; then
+    reset_effect
+    printf 'disabled by configuration\n'
+    return
+  fi
+
+  batch=$(build_batch)
+  hyprctl --batch "$batch" >/dev/null
+  : > "$active_marker"
+  printf 'active, %.1fs cycle, %spx border, %spx glow\n' "$speed" "$border_size" "$radius"
+}
+
+reset_effect() {
+  require_hyprland
+  if [[ -n "$active_marker" && -e "$active_marker" ]]; then
+    rm -f -- "$active_marker"
+    hyprctl reload >/dev/null
+    printf 'restored Hyprland configuration\n'
+  fi
+}
+
+show_status() {
+  load_config
+  if [[ -n "$active_marker" && -e "$active_marker" ]]; then
+    printf 'active\n'
+  elif [[ "$enabled" == false ]]; then
+    printf 'disabled by configuration\n'
+  else
+    printf 'inactive\n'
+  fi
+  printf 'config=%s\n' "$config_file"
+}
+
+usage() {
+  cat <<'EOF'
+Usage: omaglowctl COMMAND
+
+Commands:
+  apply    Validate configuration and apply Omaglow to the running session
+  reset    Restore the user's Hyprland configuration if Omaglow is active
+  check    Validate configuration without changing Hyprland
+  print    Print the batched Hyprland Lua generated from the current configuration
+  status   Report whether this session has an active Omaglow override
+EOF
+}
+
+command_name=${1:-}
+case "$command_name" in
+  apply) apply_effect ;;
+  reset) reset_effect ;;
+  check) load_config; printf 'configuration is valid\n' ;;
+  print) load_config; build_batch; printf '\n' ;;
+  status) show_status ;;
+  -h|--help|help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

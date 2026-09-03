@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "community.omaglow",
+  "name": "Omaglow",
+  "version": "0.1.0",
+  "author": "Omaglow contributors",
+  "license": "MIT",
+  "repository": "https://github.com/omas-best/omaglow",
+  "description": "Animated Omarchy-colored glow for the focused window.",
+  "kinds": ["service"],
+  "entryPoints": {
+    "service": "OmaglowService.qml"
+  }
+}

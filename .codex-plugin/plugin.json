@@ -1,0 +1,25 @@
+{
+  "name": "omaglow",
+  "version": "0.1.0",
+  "description": "Develop and maintain the Omaglow focused-window effect for Omarchy.",
+  "author": {
+    "name": "Omaglow contributors",
+    "url": "https://github.com/omas-best"
+  },
+  "homepage": "https://github.com/omas-best/omaglow",
+  "repository": "https://github.com/omas-best/omaglow",
+  "license": "MIT",
+  "keywords": ["omarchy", "hyprland", "window-decoration"],
+  "interface": {
+    "displayName": "Omaglow",
+    "shortDescription": "Maintain the native Omarchy window glow.",
+    "longDescription": "Tools and documentation for the Omaglow Omarchy service plugin and its native Hyprland focused-window effect.",
+    "developerName": "Omaglow contributors",
+    "category": "Developer Tools",
+    "capabilities": ["Local"],
+    "brandColor": "#3388FF",
+    "composerIcon": "assets/omaglow-logo.png",
+    "logo": "assets/omaglow-logo.png",
+    "defaultPrompt": "Help me configure or develop Omaglow."
+  }
+}
